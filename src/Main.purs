@@ -55,6 +55,7 @@ recursivelyFetchReleases baseUrl accumulator page = do
 
 fetchNextPageOfReleases :: String -> Int -> Aff (Maybe (Array ReleaseInfo))
 fetchNextPageOfReleases baseUrl page = do
+  -- API doc: https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#list-releases
   let url = baseUrl <> "?per_page=100&page=" <> show page
 
   result <- Ajax.get ARF.json url
