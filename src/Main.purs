@@ -4,8 +4,9 @@ import Prelude
 
 import Affjax as Ajax
 import Affjax.ResponseFormat as ARF
+import Affjax.ResponseHeader as ARH
 import Affjax.StatusCode (StatusCode(..))
-import Data.Array (filter, null)
+import Data.Array (filter, find, null)
 import Data.Codec.Argonaut (JsonCodec, decode, printJsonDecodeError)
 import Data.Codec.Argonaut as CA
 import Data.Codec.Argonaut.Record as CAR
@@ -29,7 +30,7 @@ type ReleaseInfo =
   { name :: String
   , assets :: Array
     { name :: String
-    , url :: String
+    , browser_download_url :: String
     , id :: Int
     }
   }
@@ -40,7 +41,7 @@ releaseCodec = CAR.object "Release"
   , assets: CA.array $
     CAR.object "assets"
       { name: CA.string
-      , url: CA.string
+      , browser_download_url: CA.string
       , id: CA.int
       }
   }
@@ -73,3 +74,28 @@ fetchNextPageOfReleases baseUrl page = do
                 pure Nothing
             | otherwise -> do
                 pure $ Just releases
+
+downloadPackagesDhallFile :: String -> String -> Aff Unit
+downloadPackagesDhallFile name browser_download_url = do
+  -- API doc: https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#get-a-release-asset
+  result <- Ajax.get ARF.string browser_download_url
+  case result of
+    Left err -> do
+      throwError $ error $ Ajax.printError err
+    Right response
+      | response.status /= StatusCode 302 -> do
+          throwError $ error $ show response.status <> " " <> response.statusText
+      | otherwise -> case find (eq "Location" <<< ARH.name) response.headers of
+        Nothing -> do
+          throwError $ error $ "Could not find `Location` header in response"
+        Just locationHeader -> do
+          result2 <- Ajax.get ARF.blob $ ARH.value locationHeader
+          case result2 of
+            Left err -> do
+              throwError $ error $ Ajax.printError err
+            Right response2
+              | response2.status /= StatusCode 200 -> do
+                throwError $ error $ show response2.status <> " " <> response2.statusText
+              | otherwise -> do
+                 -- write blob content to file
+                 pure unit
