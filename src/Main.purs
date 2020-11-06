@@ -4,9 +4,8 @@ import Prelude
 
 import Affjax as Ajax
 import Affjax.ResponseFormat as ARF
-import Affjax.ResponseHeader as ARH
 import Affjax.StatusCode (StatusCode(..))
-import Data.Array (filter, find, null)
+import Data.Array (filter, find, length, null)
 import Data.Codec.Argonaut (JsonCodec, decode, printJsonDecodeError)
 import Data.Codec.Argonaut as CA
 import Data.Codec.Argonaut.Record as CAR
@@ -15,7 +14,10 @@ import Data.Foldable (for_)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Aff (Aff, error, launchAff_, throwError)
-import Effect.Class.Console (logShow)
+import Effect.Class (liftEffect)
+import Effect.Class.Console (log)
+import Node.Buffer (fromArrayBuffer)
+import Node.FS.Aff (writeFile)
 
 main :: Effect Unit
 main = launchAff_ do
@@ -23,8 +25,18 @@ main = launchAff_ do
   result <- Ajax.get ARF.json baseUrl
   releases <- recursivelyFetchReleases baseUrl [] 1
   let targetReleases = filter (\r -> not $ null r.assets) releases
-  for_ targetReleases logShow
-  pure unit
+  log $ "Found " <> show (length targetReleases) <> " releases."
+  for_ targetReleases \releaseInfo -> do
+    let tagName = releaseInfo.name
+    case find (eq "packages.dhall" <<< _.name) releaseInfo.assets of
+      Nothing -> do
+        log $ "Skipping release: " <> tagName
+        log ""
+      Just asset -> do
+        log $ "Downloading file from release: " <> tagName
+        downloadPackagesDhallFile tagName asset.browser_download_url
+        log ""
+  log "Finished."
 
 type ReleaseInfo =
   { name :: String
@@ -78,24 +90,16 @@ fetchNextPageOfReleases baseUrl page = do
 downloadPackagesDhallFile :: String -> String -> Aff Unit
 downloadPackagesDhallFile name browser_download_url = do
   -- API doc: https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#get-a-release-asset
-  result <- Ajax.get ARF.string browser_download_url
+  log $ "browser_download_url: " <> browser_download_url
+  result <- Ajax.get ARF.arrayBuffer browser_download_url
   case result of
     Left err -> do
       throwError $ error $ Ajax.printError err
     Right response
-      | response.status /= StatusCode 302 -> do
+      | response.status /= StatusCode 200 -> do
+          log "Failed to get package file"
+          -- log response.body
           throwError $ error $ show response.status <> " " <> response.statusText
-      | otherwise -> case find (eq "Location" <<< ARH.name) response.headers of
-        Nothing -> do
-          throwError $ error $ "Could not find `Location` header in response"
-        Just locationHeader -> do
-          result2 <- Ajax.get ARF.blob $ ARH.value locationHeader
-          case result2 of
-            Left err -> do
-              throwError $ error $ Ajax.printError err
-            Right response2
-              | response2.status /= StatusCode 200 -> do
-                throwError $ error $ show response2.status <> " " <> response2.statusText
-              | otherwise -> do
-                 -- write blob content to file
-                 pure unit
+      | otherwise -> do
+        buffer <- liftEffect $ fromArrayBuffer response.body
+        writeFile ("./files/" <> name) buffer
