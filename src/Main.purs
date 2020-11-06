@@ -102,4 +102,5 @@ downloadPackagesDhallFile name browser_download_url = do
           throwError $ error $ show response.status <> " " <> response.statusText
       | otherwise -> do
         buffer <- liftEffect $ fromArrayBuffer response.body
-        writeFile ("./files/" <> name) buffer
+        let folder = "./files/" <> name <> "/"
+        writeFile (folder <> "packages.dhall") buffer
