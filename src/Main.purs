@@ -143,8 +143,10 @@ fixFileAndUploadResult rec buffer = do
 
     originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) deso
     originalHash <- toString UTF8 originalBuffer
+    log $ "Original: " <> originalHash
     newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) deso
     newHash <- toString UTF8 newBuffer
+    log $ "Fixed:    " <> newHash
 
     if (originalHash == newHash) then do
       log "Hashes match"
