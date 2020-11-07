@@ -8,7 +8,9 @@ You can edit this file as you like.
   , "codec-argonaut"
   , "console"
   , "effect"
+  , "node-child-process"
   , "node-fs-aff"
+  , "node-process"
   , "psci-support"
   ]
 , packages = ./packages.dhall

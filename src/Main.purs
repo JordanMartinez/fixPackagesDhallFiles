@@ -16,11 +16,25 @@ import Effect (Effect)
 import Effect.Aff (Aff, error, launchAff_, throwError)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import Node.Buffer (fromArrayBuffer)
-import Node.FS.Aff (writeFile)
+import Node.Buffer (fromArrayBuffer, toString)
+import Node.ChildProcess (defaultExecOptions, defaultExecSyncOptions, execSync)
+import Node.Encoding (Encoding(..))
+import Node.FS.Aff (exists, mkdir, writeFile)
+import Web.File.FileReader (result)
+
+parentFolder :: String
+parentFolder = "./files"
+
+originalFile :: String
+originalFile = "packages-original.dhall"
+
+fixedFile :: String
+fixedFile = "packages-fixed.dhall"
 
 main :: Effect Unit
 main = launchAff_ do
+  whenM (not <$> exists parentFolder) do
+    mkdir parentFolder
   let baseUrl = "https://api.github.com/repos/purescript/package-sets/releases"
   result <- Ajax.get ARF.json baseUrl
   releases <- recursivelyFetchReleases baseUrl [] 1
@@ -88,7 +102,7 @@ fetchNextPageOfReleases baseUrl page = do
                 pure $ Just releases
 
 downloadPackagesDhallFile :: String -> String -> Aff Unit
-downloadPackagesDhallFile name browser_download_url = do
+downloadPackagesDhallFile tagName browser_download_url = do
   -- API doc: https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#get-a-release-asset
   log $ "browser_download_url: " <> browser_download_url
   result <- Ajax.get ARF.arrayBuffer browser_download_url
@@ -102,5 +116,25 @@ downloadPackagesDhallFile name browser_download_url = do
           throwError $ error $ show response.status <> " " <> response.statusText
       | otherwise -> do
         buffer <- liftEffect $ fromArrayBuffer response.body
-        let folder = "./files/" <> name <> "/"
-        writeFile (folder <> "packages.dhall") buffer
+        let
+          tagFolder = parentFolder <> "/" <> tagName
+          oldFile = tagFolder <> "/" <> originalFile
+          newFile = tagFolder <> "/" <> fixedFile
+        whenM (not <$> exists tagFolder) do
+          mkdir tagFolder
+
+        writeFile oldFile buffer
+        hashesAreSame <- liftEffect do
+          originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) defaultExecSyncOptions
+          void $ execSync ("cp " <> oldFile <> " " <> newFile) defaultExecSyncOptions
+          void $ execSync ("sed -i 's/ assert /`assert`/' " <> newFile) defaultExecSyncOptions
+          newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) defaultExecSyncOptions
+          originalHash <- toString UTF8 originalBuffer
+          newHash <- toString UTF8 newBuffer
+          log $ "Old hash: " <> originalHash
+          log $ "New hash: " <> newHash
+          pure $ originalHash == newHash
+        if hashesAreSame then do
+          log "Hashes are good. Here we would upload to GitHub."
+        else do
+          throwError $ error $ "Different hashes. Aborting"
