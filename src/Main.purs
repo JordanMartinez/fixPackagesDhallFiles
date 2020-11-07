@@ -17,19 +17,14 @@ import Effect.Aff (Aff, error, launchAff_, throwError)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Node.Buffer (fromArrayBuffer, toString)
-import Node.ChildProcess (defaultExecOptions, defaultExecSyncOptions, execSync)
+import Node.ChildProcess (defaultExecSyncOptions, execSync)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff (exists, mkdir, writeFile)
-import Web.File.FileReader (result)
 
-parentFolder :: String
-parentFolder = "./files"
-
-originalFile :: String
-originalFile = "packages-original.dhall"
-
-fixedFile :: String
-fixedFile = "packages-fixed.dhall"
+-- If this value is true and you run this program, it will overwrite
+-- the packages.dhall file in each release with its fixed version.
+unsafe_Upload_Fixed_Packages_Dhall_File :: Boolean
+unsafe_Upload_Fixed_Packages_Dhall_File = false
 
 main :: Effect Unit
 main = launchAff_ do
@@ -48,7 +43,10 @@ main = launchAff_ do
         log ""
       Just asset -> do
         log $ "Downloading file from release: " <> tagName
-        downloadPackagesDhallFile tagName asset.browser_download_url
+        downloadPackagesDhallFile
+          { tagName: releaseInfo.name
+          , browser_download_url: asset.browser_download_url
+          }
         log ""
   log "Finished."
 
@@ -57,8 +55,12 @@ type ReleaseInfo =
   , assets :: Array
     { name :: String
     , browser_download_url :: String
-    , id :: Int
     }
+  }
+
+type AssetInfo =
+  { tagName :: String
+  , browser_download_url :: String
   }
 
 releaseCodec :: JsonCodec ReleaseInfo
@@ -68,7 +70,6 @@ releaseCodec = CAR.object "Release"
     CAR.object "assets"
       { name: CA.string
       , browser_download_url: CA.string
-      , id: CA.int
       }
   }
 
@@ -101,40 +102,51 @@ fetchNextPageOfReleases baseUrl page = do
             | otherwise -> do
                 pure $ Just releases
 
-downloadPackagesDhallFile :: String -> String -> Aff Unit
-downloadPackagesDhallFile tagName browser_download_url = do
+downloadPackagesDhallFile :: AssetInfo -> Aff Unit
+downloadPackagesDhallFile rec = do
   -- API doc: https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#get-a-release-asset
-  log $ "browser_download_url: " <> browser_download_url
-  result <- Ajax.get ARF.arrayBuffer browser_download_url
+  log $ "browser_download_url: " <> rec.browser_download_url
+  result <- Ajax.get ARF.arrayBuffer rec.browser_download_url
   case result of
     Left err -> do
       throwError $ error $ Ajax.printError err
     Right response
       | response.status /= StatusCode 200 -> do
           log "Failed to get package file"
-          -- log response.body
           throwError $ error $ show response.status <> " " <> response.statusText
       | otherwise -> do
         buffer <- liftEffect $ fromArrayBuffer response.body
         let
-          tagFolder = parentFolder <> "/" <> tagName
+          tagFolder = parentFolder <> "/" <> rec.tagName
           oldFile = tagFolder <> "/" <> originalFile
           newFile = tagFolder <> "/" <> fixedFile
+          uploadFile = tagFolder <> "/packages.dhall"
         whenM (not <$> exists tagFolder) do
           mkdir tagFolder
 
         writeFile oldFile buffer
-        hashesAreSame <- liftEffect do
-          originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) defaultExecSyncOptions
+        liftEffect do
           void $ execSync ("cp " <> oldFile <> " " <> newFile) defaultExecSyncOptions
           void $ execSync ("sed -i 's/ assert /`assert`/' " <> newFile) defaultExecSyncOptions
+          originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) defaultExecSyncOptions
           newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) defaultExecSyncOptions
           originalHash <- toString UTF8 originalBuffer
           newHash <- toString UTF8 newBuffer
-          log $ "Old hash: " <> originalHash
-          log $ "New hash: " <> newHash
-          pure $ originalHash == newHash
-        if hashesAreSame then do
-          log "Hashes are good. Here we would upload to GitHub."
-        else do
-          throwError $ error $ "Different hashes. Aborting"
+          if (originalHash == newHash) then do
+            log "Hashes match"
+            if unsafe_Upload_Fixed_Packages_Dhall_File then do
+              void $ execSync ("mv " <> newFile <> " " <> uploadFile) defaultExecSyncOptions
+              void $ execSync ("gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets") defaultExecSyncOptions
+            else do
+              log "While hashes match, we aren't uploading this."
+          else do
+            throwError $ error $ "Different hashes. Aborting"
+
+parentFolder :: String
+parentFolder = "./files"
+
+originalFile :: String
+originalFile = "packages-original.dhall"
+
+fixedFile :: String
+fixedFile = "packages-fixed.dhall"
