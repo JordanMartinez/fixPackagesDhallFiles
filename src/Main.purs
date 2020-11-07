@@ -16,7 +16,7 @@ import Effect (Effect)
 import Effect.Aff (Aff, error, launchAff_, throwError)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
-import Node.Buffer (fromArrayBuffer, toString)
+import Node.Buffer (Buffer, fromArrayBuffer, toString)
 import Node.ChildProcess (defaultExecSyncOptions, execSync)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff (exists, mkdir, writeFile)
@@ -26,15 +26,21 @@ import Node.FS.Aff (exists, mkdir, writeFile)
 unsafe_Upload_Fixed_Packages_Dhall_File :: Boolean
 unsafe_Upload_Fixed_Packages_Dhall_File = false
 
+fileFolder :: String
+fileFolder = "./files"
+
 main :: Effect Unit
 main = launchAff_ do
-  whenM (not <$> exists parentFolder) do
-    mkdir parentFolder
+  whenM (not <$> exists fileFolder) do
+    mkdir fileFolder
+
   let baseUrl = "https://api.github.com/repos/purescript/package-sets/releases"
   result <- Ajax.get ARF.json baseUrl
   releases <- recursivelyFetchReleases baseUrl [] 1
+
   let targetReleases = filter (\r -> not $ null r.assets) releases
   log $ "Found " <> show (length targetReleases) <> " releases."
+
   for_ targetReleases \releaseInfo -> do
     let tagName = releaseInfo.name
     case find (eq "packages.dhall" <<< _.name) releaseInfo.assets of
@@ -43,10 +49,12 @@ main = launchAff_ do
         log ""
       Just asset -> do
         log $ "Downloading file from release: " <> tagName
-        downloadPackagesDhallFile
-          { tagName: releaseInfo.name
-          , browser_download_url: asset.browser_download_url
-          }
+        let assetInfo =
+              { tagName: releaseInfo.name
+              , browser_download_url: asset.browser_download_url
+              }
+        buffer <- downloadPackagesDhallFile assetInfo
+        fixFileAndUploadResult assetInfo buffer
         log ""
   log "Finished."
 
@@ -102,7 +110,7 @@ fetchNextPageOfReleases baseUrl page = do
             | otherwise -> do
                 pure $ Just releases
 
-downloadPackagesDhallFile :: AssetInfo -> Aff Unit
+downloadPackagesDhallFile :: AssetInfo -> Aff Buffer
 downloadPackagesDhallFile rec = do
   -- API doc: https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#get-a-release-asset
   log $ "browser_download_url: " <> rec.browser_download_url
@@ -115,38 +123,35 @@ downloadPackagesDhallFile rec = do
           log "Failed to get package file"
           throwError $ error $ show response.status <> " " <> response.statusText
       | otherwise -> do
-        buffer <- liftEffect $ fromArrayBuffer response.body
-        let
-          tagFolder = parentFolder <> "/" <> rec.tagName
-          oldFile = tagFolder <> "/" <> originalFile
-          newFile = tagFolder <> "/" <> fixedFile
-          uploadFile = tagFolder <> "/packages.dhall"
-        whenM (not <$> exists tagFolder) do
-          mkdir tagFolder
+        liftEffect $ fromArrayBuffer response.body
 
-        writeFile oldFile buffer
-        liftEffect do
-          void $ execSync ("cp " <> oldFile <> " " <> newFile) defaultExecSyncOptions
-          void $ execSync ("sed -i 's/ assert /`assert`/' " <> newFile) defaultExecSyncOptions
-          originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) defaultExecSyncOptions
-          newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) defaultExecSyncOptions
-          originalHash <- toString UTF8 originalBuffer
-          newHash <- toString UTF8 newBuffer
-          if (originalHash == newHash) then do
-            log "Hashes match"
-            if unsafe_Upload_Fixed_Packages_Dhall_File then do
-              void $ execSync ("mv " <> newFile <> " " <> uploadFile) defaultExecSyncOptions
-              void $ execSync ("gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets") defaultExecSyncOptions
-            else do
-              log "While hashes match, we aren't uploading this."
-          else do
-            throwError $ error $ "Different hashes. Aborting"
+fixFileAndUploadResult :: AssetInfo -> Buffer -> Aff Unit
+fixFileAndUploadResult rec buffer = do
+  let
+    tagFolder = fileFolder <> "/" <> rec.tagName
+    oldFile = tagFolder <> "/" <> "packages-original.dhall"
+    newFile = tagFolder <> "/" <> "packages-fixed.dhall"
+    uploadFile = tagFolder <> "/" <> "packages.dhall"
+  whenM (not <$> exists tagFolder) do
+    mkdir tagFolder
 
-parentFolder :: String
-parentFolder = "./files"
+  writeFile oldFile buffer
+  liftEffect do
+    let deso = defaultExecSyncOptions
+    void $ execSync ("cp " <> oldFile <> " " <> newFile) deso
+    void $ execSync ("sed -i 's/ assert /`assert`/' " <> newFile) deso
 
-originalFile :: String
-originalFile = "packages-original.dhall"
+    originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) deso
+    originalHash <- toString UTF8 originalBuffer
+    newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) deso
+    newHash <- toString UTF8 newBuffer
 
-fixedFile :: String
-fixedFile = "packages-fixed.dhall"
+    if (originalHash == newHash) then do
+      log "Hashes match"
+      if unsafe_Upload_Fixed_Packages_Dhall_File then do
+        void $ execSync ("mv " <> newFile <> " " <> uploadFile) defaultExecSyncOptions
+        void $ execSync ("gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets") defaultExecSyncOptions
+      else do
+        log "While hashes match, we aren't uploading this."
+    else do
+      throwError $ error $ "Different hashes. Aborting"
