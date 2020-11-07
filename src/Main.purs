@@ -21,6 +21,23 @@ import Node.ChildProcess (defaultExecSyncOptions, execSync)
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff (exists, mkdir, writeFile)
 
+{-
+Before running this program, you need 2 files:
+- dhall-1.32.0 - the `dhall` program's file at version 1.32.0
+- dhall-1.36.0 - the `dhall` program's file at version 1.36.0
+
+When you run this program, the fixed files will not overwrite the corresponding
+file for that tag's `packages.dhall` file. It will show that the code works
+correctly.
+
+If you want to use this program to upload and overwrite the current
+`packages.dhall` file with their updated version, the following must be true
+- `gh auth status` will show that you are logged in
+- `unsafe_Upload_Fixed_Packages_Dhall_File` was changed to true
+
+-}
+
+
 -- If this value is true and you run this program, it will overwrite
 -- the packages.dhall file in each release with its fixed version.
 unsafe_Upload_Fixed_Packages_Dhall_File :: Boolean
