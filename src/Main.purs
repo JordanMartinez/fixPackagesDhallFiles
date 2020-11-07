@@ -75,30 +75,6 @@ main = launchAff_ do
         log ""
   log "Finished."
 
-type ReleaseInfo =
-  { name :: String
-  , assets :: Array
-    { name :: String
-    , browser_download_url :: String
-    }
-  }
-
-type AssetInfo =
-  { tagName :: String
-  , browser_download_url :: String
-  }
-
-releaseCodec :: JsonCodec ReleaseInfo
-releaseCodec = CAR.object "Release"
-  { name: CA.string
-  , assets: CA.array $
-    CAR.object "assets"
-      { name: CA.string
-      , browser_download_url: CA.string
-      }
-  }
-
-
 recursivelyFetchReleases :: String -> Array ReleaseInfo -> Int -> Aff (Array ReleaseInfo)
 recursivelyFetchReleases baseUrl accumulator page = do
   pageNResult <- fetchNextPageOfReleases baseUrl page
@@ -174,3 +150,28 @@ fixFileAndUploadResult rec buffer = do
         log "While hashes match, we aren't uploading this."
     else do
       throwError $ error $ "Different hashes. Aborting"
+
+-- codec info
+
+type ReleaseInfo =
+  { name :: String -- the tag name
+  , assets :: Array
+    { name :: String -- the file name
+    , browser_download_url :: String -- url for downloading it
+    }
+  }
+
+type AssetInfo =
+  { tagName :: String
+  , browser_download_url :: String
+  }
+
+releaseCodec :: JsonCodec ReleaseInfo
+releaseCodec = CAR.object "Release"
+  { name: CA.string
+  , assets: CA.array $
+    CAR.object "assets"
+      { name: CA.string
+      , browser_download_url: CA.string
+      }
+  }
