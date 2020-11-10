@@ -5,13 +5,14 @@ import Prelude
 import Affjax as Ajax
 import Affjax.ResponseFormat as ARF
 import Affjax.StatusCode (StatusCode(..))
-import Data.Array (filter, find, length, null)
+import Data.Array (elem, filter, find, length, null)
 import Data.Codec.Argonaut (JsonCodec, decode, printJsonDecodeError)
 import Data.Codec.Argonaut as CA
 import Data.Codec.Argonaut.Record as CAR
 import Data.Either (Either(..))
 import Data.Foldable (for_)
 import Data.Maybe (Maybe(..))
+import Data.String (Pattern(..), split)
 import Effect (Effect)
 import Effect.Aff (Aff, error, launchAff_, throwError)
 import Effect.Class (liftEffect)
@@ -19,7 +20,7 @@ import Effect.Class.Console (log)
 import Node.Buffer (Buffer, fromArrayBuffer, toString)
 import Node.ChildProcess (defaultExecSyncOptions, execSync)
 import Node.Encoding (Encoding(..))
-import Node.FS.Aff (exists, mkdir, readTextFile, writeFile)
+import Node.FS.Aff (appendTextFile, exists, mkdir, readTextFile, writeFile)
 
 {-
 Before running this program, you need 2 files:
@@ -58,21 +59,30 @@ main = launchAff_ do
   let targetReleases = filter (\r -> not $ null r.assets) releases
   log $ "Found " <> show (length targetReleases) <> " releases."
 
+  let doneFile = "./done.txt"
+
+  doneReleases <- readTextFile UTF8 doneFile
+  let alreadyDoneReleases = split (Pattern "\n") doneReleases
+
   for_ targetReleases \releaseInfo -> do
     let tagName = releaseInfo.name
-    case find (eq "packages.dhall" <<< _.name) releaseInfo.assets of
-      Nothing -> do
-        log $ "Skipping release: " <> tagName
-        log ""
-      Just asset -> do
-        log $ "Downloading file from release: " <> tagName
-        let assetInfo =
-              { tagName: releaseInfo.name
-              , browser_download_url: asset.browser_download_url
-              }
-        buffer <- downloadPackagesDhallFile assetInfo
-        fixFileAndUploadResult assetInfo buffer
-        log ""
+    if elem tagName alreadyDoneReleases then do
+      log "Already fixed. Ignoring..."
+    else do
+      case find (eq "packages.dhall" <<< _.name) releaseInfo.assets of
+        Nothing -> do
+          log $ "Skipping release: " <> tagName
+          log ""
+        Just asset -> do
+          log $ "Downloading file from release: " <> tagName
+          let assetInfo =
+                { tagName: releaseInfo.name
+                , browser_download_url: asset.browser_download_url
+                }
+          buffer <- downloadPackagesDhallFile assetInfo
+          fixFileAndUploadResult assetInfo buffer
+          appendTextFile UTF8 doneFile tagName
+          log ""
   log "Finished."
 
 recursivelyFetchReleases :: String -> Array ReleaseInfo -> Int -> Aff (Array ReleaseInfo)
