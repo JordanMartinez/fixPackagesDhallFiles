@@ -41,7 +41,7 @@ If you want to use this program to upload and overwrite the current
 -- If this value is true and you run this program, it will overwrite
 -- the packages.dhall file in each release with its fixed version.
 unsafe_Upload_Fixed_Packages_Dhall_File :: Boolean
-unsafe_Upload_Fixed_Packages_Dhall_File = false
+unsafe_Upload_Fixed_Packages_Dhall_File = true
 
 fileFolder :: String
 fileFolder = "./folder"
