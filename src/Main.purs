@@ -81,7 +81,7 @@ main = launchAff_ do
                 }
           buffer <- downloadPackagesDhallFile assetInfo
           fixFileAndUploadResult assetInfo buffer
-          appendTextFile UTF8 doneFile tagName
+          appendTextFile UTF8 doneFile (tagName <> "\n")
           log ""
   log "Finished."
 
