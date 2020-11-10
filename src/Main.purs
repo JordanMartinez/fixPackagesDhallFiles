@@ -44,7 +44,7 @@ unsafe_Upload_Fixed_Packages_Dhall_File :: Boolean
 unsafe_Upload_Fixed_Packages_Dhall_File = false
 
 fileFolder :: String
-fileFolder = "./files"
+fileFolder = "./folder"
 
 main :: Effect Unit
 main = launchAff_ do
