@@ -161,7 +161,9 @@ fixFileAndUploadResult rec buffer = do
         log "Hashes match"
         if unsafe_Upload_Fixed_Packages_Dhall_File then do
           void $ execSync ("mv " <> newFile <> " " <> uploadFile) defaultExecSyncOptions
-          void $ execSync ("gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets") defaultExecSyncOptions
+          let ghReleaseCommand = "gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets"
+          log ghReleaseCommand
+          void $ execSync ghReleaseCommand defaultExecSyncOptions
         else do
           log "While hashes match, we aren't uploading this."
       else do
