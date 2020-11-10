@@ -19,7 +19,7 @@ import Effect.Class.Console (log)
 import Node.Buffer (Buffer, fromArrayBuffer, toString)
 import Node.ChildProcess (defaultExecSyncOptions, execSync)
 import Node.Encoding (Encoding(..))
-import Node.FS.Aff (exists, mkdir, writeFile)
+import Node.FS.Aff (exists, mkdir, readTextFile, writeFile)
 
 {-
 Before running this program, you need 2 files:
@@ -129,27 +129,33 @@ fixFileAndUploadResult rec buffer = do
     mkdir tagFolder
 
   writeFile oldFile buffer
-  liftEffect do
-    let deso = defaultExecSyncOptions
+  let deso = defaultExecSyncOptions
+  void $ liftEffect do
     void $ execSync ("cp " <> oldFile <> " " <> newFile) deso
     void $ execSync ("sed -i 's/ assert /`assert`/' " <> newFile) deso
 
-    originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) deso
-    originalHash <- toString UTF8 originalBuffer
-    log $ "Original: " <> originalHash
-    newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) deso
-    newHash <- toString UTF8 newBuffer
-    log $ "Fixed:    " <> newHash
+  oldFileContent <- readTextFile UTF8 oldFile
+  newFileContent <- readTextFile UTF8 newFile
+  if oldFileContent == newFileContent then do
+    log "No need to upload. Same file."
+  else do
+    liftEffect do
+      originalBuffer <- execSync ("./dhall-1.32.0 hash --file " <> oldFile) deso
+      originalHash <- toString UTF8 originalBuffer
+      log $ "Original: " <> originalHash
+      newBuffer <- execSync ("./dhall-1.36.0 hash --file " <> newFile) deso
+      newHash <- toString UTF8 newBuffer
+      log $ "Fixed:    " <> newHash
 
-    if (originalHash == newHash) then do
-      log "Hashes match"
-      if unsafe_Upload_Fixed_Packages_Dhall_File then do
-        void $ execSync ("mv " <> newFile <> " " <> uploadFile) defaultExecSyncOptions
-        void $ execSync ("gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets") defaultExecSyncOptions
+      if (originalHash == newHash) then do
+        log "Hashes match"
+        if unsafe_Upload_Fixed_Packages_Dhall_File then do
+          void $ execSync ("mv " <> newFile <> " " <> uploadFile) defaultExecSyncOptions
+          void $ execSync ("gh release upload " <> rec.tagName <> " " <> uploadFile <> " --clobber --repo purescript/package-sets") defaultExecSyncOptions
+        else do
+          log "While hashes match, we aren't uploading this."
       else do
-        log "While hashes match, we aren't uploading this."
-    else do
-      throwError $ error $ "Different hashes. Aborting"
+        throwError $ error $ "Different hashes. Aborting"
 
 -- codec info
 
